@@ -131,9 +131,12 @@ def get_global_snapshot():
     rows = []
     for name, ticker in GLOBAL_TICKERS.items():
         try:
-            hist = yf.Ticker(ticker).history(period="2d")
+            hist = yf.Ticker(ticker).history(period="5d").dropna(subset=["Close"])
             if len(hist) >= 2:
                 prev, last = hist["Close"].iloc[-2], hist["Close"].iloc[-1]
+                if pd.isna(prev) or pd.isna(last):
+                    rows.append({"Asset": name, "Value": None, "Change %": None})
+                    continue
                 pct = (last - prev) / prev * 100
                 rows.append({"Asset": name, "Value": round(last, 2), "Change %": round(pct, 2)})
             else:
@@ -198,44 +201,59 @@ def get_all_indices():
         return None
 
 
+def _safe_float(val):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_sector_performance(all_indices):
     if not all_indices:
         return None
-    rows = []
-    for d in all_indices:
-        name = d.get("index", "")
-        if name in SECTOR_KEYWORDS:
-            rows.append({
-                "Sector": name.replace("NIFTY ", ""),
-                "Change %": d.get("percentChange"),
-            })
-    if not rows:
+    try:
+        rows = []
+        for d in all_indices:
+            name = d.get("index", "")
+            if name in SECTOR_KEYWORDS:
+                rows.append({
+                    "Sector": name.replace("NIFTY ", ""),
+                    "Change %": _safe_float(d.get("percentChange")),
+                })
+        if not rows:
+            return None
+        df = pd.DataFrame(rows).dropna()
+        if df.empty:
+            return None
+        return df.sort_values("Change %", ascending=False).reset_index(drop=True)
+    except Exception:
         return None
-    df = pd.DataFrame(rows).dropna()
-    return df.sort_values("Change %", ascending=False).reset_index(drop=True)
 
 
 def get_nifty_valuation(all_indices):
     if not all_indices:
         return None
-    for d in all_indices:
-        if d.get("index") == "NIFTY 50":
-            pe = d.get("pe")
-            pb = d.get("pb")
-            div_yield = d.get("divYield") or d.get("dy")
-            if pe is None:
-                return None
-            eps = round(d.get("last", 0) / pe, 2) if d.get("last") and pe else None
-            status = "N/A"
-            if pe:
+    try:
+        for d in all_indices:
+            if d.get("index") == "NIFTY 50":
+                pe = _safe_float(d.get("pe"))
+                pb = _safe_float(d.get("pb"))
+                div_yield = _safe_float(d.get("divYield") or d.get("dy"))
+                last = _safe_float(d.get("last"))
+                if pe is None:
+                    return None
+                eps = round(last / pe, 2) if last and pe else None
+                status = "N/A"
                 if pe < NIFTY_PE_10YR_AVG * 0.9:
                     status = "🟢 Cheap"
                 elif pe > NIFTY_PE_10YR_AVG * 1.1:
                     status = "🔴 Expensive"
                 else:
                     status = "🟠 Fair"
-            return {"pe": pe, "pb": pb, "div_yield": div_yield, "eps": eps, "status": status}
-    return None
+                return {"pe": pe, "pb": pb, "div_yield": div_yield, "eps": eps, "status": status}
+        return None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
