@@ -2,3 +2,5 @@ streamlit
 yfinance
 nsepython
 pandas
+numpy
+requests
