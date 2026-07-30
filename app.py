@@ -688,7 +688,9 @@ if sector_df is not None and len(sector_df) > 0:
 health_score = round((health_points / health_max) * 100) if health_max else None
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Market Health Score", f"{health_score}/100" if health_score is not None else "N/A")
+m1.metric("Market Health Score",
+          f"{health_score}/100" if health_score is not None else "N/A",
+          f"based on {health_max} of 4 possible signals" if health_max else None)
 m2.metric("Nifty Valuation", valuation["status"] if valuation else "N/A")
 risk_level = "N/A"
 if vix_val is not None:
@@ -711,12 +713,13 @@ positives = sum(1 for _, ok in checklist_items if ok)
 total_checks = len(checklist_items)
 
 if health_score is not None:
+    coverage_note = f" (based on {health_max} of 4 possible signals — {'full data' if health_max == 4 else 'some data, like Breadth or Options, was unavailable right now'})"
     if health_score >= 70:
-        verdict = f"🟢 **Conditions look supportive ({health_score}/100).** Most of what we can measure — breadth, FII flows, volatility, sector participation — is pointing the right way. Still your call, but this isn't a market fighting you right now."
+        verdict = f"🟢 **Conditions look supportive ({health_score}/100{coverage_note}).** What we could measure — breadth, FII flows, volatility, sector participation — is pointing the right way. Still your call, but this isn't a market fighting you right now."
     elif health_score >= 40:
-        verdict = f"🟠 **Mixed picture ({health_score}/100).** Some signals are constructive, others aren't — {positives}/{total_checks} checklist items are green. Worth being selective rather than aggressive."
+        verdict = f"🟠 **Mixed picture ({health_score}/100{coverage_note}).** Some signals are constructive, others aren't — {positives}/{total_checks} checklist items are green. Worth being selective rather than aggressive."
     else:
-        verdict = f"🔴 **Caution warranted ({health_score}/100).** Most of what we can measure is leaning unfavorable right now — only {positives}/{total_checks} checklist items are green. Not a strong backdrop for fresh risk."
+        verdict = f"🔴 **Caution warranted ({health_score}/100{coverage_note}).** Most of what we could measure is leaning unfavorable right now — only {positives}/{total_checks} checklist items are green. Not a strong backdrop for fresh risk."
 else:
     verdict = "⚪ Not enough data came through to form a verdict right now — try refreshing."
 st.markdown(verdict)
