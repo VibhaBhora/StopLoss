@@ -13,6 +13,7 @@ Sections:
  9. Opportunity Scanner (derived from Watchlist - no extra data needed)
 10. Important Events (manually-maintained calendar - no free live feed exists)
 11. Market Health Score / Valuation Meter / Risk Meter / Checklist
+12. Portfolio (live holdings via Angel One SmartAPI)
 
 DATA RELIABILITY NOTES (read this before debugging a blank section):
 - [RELIABLE]  Yahoo Finance (yfinance) prices, history, PE/EPS/ROE/Debt-Equity
@@ -28,6 +29,10 @@ DATA RELIABILITY NOTES (read this before debugging a blank section):
   UI layer doesn't need to change.
 - [MANUAL] Important Events - no free live economic calendar API exists.
   Update the EVENTS list below by hand for now.
+- [LIVE - Angel One SmartAPI] Portfolio holdings - requires ANGEL_API_KEY,
+  ANGEL_CLIENT_CODE, ANGEL_MPIN, ANGEL_TOTP_SECRET set as Streamlit Secrets
+  (never in this file / GitHub, since the repo is public). Shows "not
+  connected" until those are set.
 
 Every data source lives in its own get_*() function so a future swap to a
 paid vendor (e.g. for options data or shareholding) only touches that one
@@ -45,6 +50,13 @@ try:
     from nsepython import nse_fiidii
 except Exception:
     nse_fiidii = None
+
+try:
+    from SmartApi import SmartConnect
+    import pyotp
+except Exception:
+    SmartConnect = None
+    pyotp = None
 
 st.set_page_config(page_title="StopLoss", page_icon="📈", layout="wide")
 
@@ -421,6 +433,68 @@ def style_signed(df, cols):
     except Exception:
         return df
 
+
+# ---------------------------------------------------------------------------
+# 12. Portfolio (Angel One SmartAPI - live holdings)
+# ---------------------------------------------------------------------------
+def _angel_login():
+    if SmartConnect is None or pyotp is None:
+        return None
+    try:
+        api_key = st.secrets["ANGEL_API_KEY"]
+        client_code = st.secrets["ANGEL_CLIENT_CODE"]
+        mpin = st.secrets["ANGEL_MPIN"]
+        totp_secret = st.secrets["ANGEL_TOTP_SECRET"]
+    except Exception:
+        return None
+    try:
+        obj = SmartConnect(api_key=api_key)
+        totp = pyotp.TOTP(totp_secret).now()
+        data = obj.generateSession(client_code, mpin, totp)
+        if not data or not data.get("status"):
+            return None
+        return obj
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def get_portfolio():
+    obj = _angel_login()
+    if obj is None:
+        return None
+    try:
+        resp = obj.holding()
+        holdings = (resp or {}).get("data") or []
+        if not holdings:
+            return None
+        rows = []
+        for h in holdings:
+            qty = float(h.get("quantity", 0) or 0)
+            avg_price = float(h.get("averageprice", 0) or 0)
+            ltp = float(h.get("ltp", 0) or 0)
+            invested = qty * avg_price
+            current = qty * ltp
+            pnl = current - invested
+            pnl_pct = round(pnl / invested * 100, 2) if invested else None
+            rows.append({
+                "Symbol": (h.get("tradingsymbol", "") or "").replace("-EQ", ""),
+                "Qty": qty,
+                "Avg Price": round(avg_price, 2),
+                "LTP": round(ltp, 2),
+                "Invested (₹)": round(invested, 2),
+                "Current Value (₹)": round(current, 2),
+                "P&L (₹)": round(pnl, 2),
+                "P&L %": pnl_pct,
+            })
+        df = pd.DataFrame(rows)
+        total_current = df["Current Value (₹)"].sum()
+        df["Allocation %"] = round(df["Current Value (₹)"] / total_current * 100, 2) if total_current else None
+        return df
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
@@ -535,6 +609,33 @@ with st.spinner("Fetching watchlist data..."):
 st.dataframe(style_signed(watchlist_df, ["Change %", "MACD"]), use_container_width=True, hide_index=True)
 st.caption("ROCE, Delivery %, Promoter/FII/DII Holding: not available from free data "
            "sources — shown as N/A until a paid data vendor is added.")
+st.divider()
+
+# --- Section 12: Portfolio (live, Angel One) ---
+st.subheader("💼 My Portfolio")
+portfolio_df = get_portfolio()
+if portfolio_df is not None and len(portfolio_df) > 0:
+    total_invested = portfolio_df["Invested (₹)"].sum()
+    total_current = portfolio_df["Current Value (₹)"].sum()
+    total_pnl = total_current - total_invested
+    total_pnl_pct = round(total_pnl / total_invested * 100, 2) if total_invested else None
+
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Invested", f"₹{total_invested:,.0f}")
+    p2.metric("Current Value", f"₹{total_current:,.0f}")
+    p3.metric("Overall P&L", f"₹{total_pnl:,.0f}", f"{total_pnl_pct}%" if total_pnl_pct is not None else None)
+
+    st.dataframe(
+        style_signed(portfolio_df, ["P&L (₹)", "P&L %"]),
+        use_container_width=True, hide_index=True
+    )
+    st.bar_chart(portfolio_df.set_index("Symbol")["Allocation %"])
+else:
+    st.info(
+        "Portfolio not connected yet. Add your Angel One API credentials as Streamlit "
+        "Secrets (ANGEL_API_KEY, ANGEL_CLIENT_CODE, ANGEL_MPIN, ANGEL_TOTP_SECRET) to "
+        "enable live holdings tracking."
+    )
 st.divider()
 
 # --- Section 9: Opportunity Scanner ---
