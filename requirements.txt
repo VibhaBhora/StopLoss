@@ -4,3 +4,5 @@ nsepython
 pandas
 numpy
 requests
+smartapi-python
+pyotp
