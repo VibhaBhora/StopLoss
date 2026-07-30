@@ -410,8 +410,16 @@ def style_signed(df, cols):
             return "color: #e74c3c"
         return ""
     existing = [c for c in cols if c in df.columns]
-    return df.style.applymap(_color, subset=existing)
-
+    if not existing:
+        return df
+    try:
+        styler = df.style
+        try:
+            return styler.map(_color, subset=existing)
+        except AttributeError:
+            return styler.applymap(_color, subset=existing)
+    except Exception:
+        return df
 
 # ---------------------------------------------------------------------------
 # UI
