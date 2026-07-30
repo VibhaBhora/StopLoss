@@ -396,6 +396,24 @@ def run_opportunity_scanner(df):
 
 
 # ---------------------------------------------------------------------------
+# Styling helper - color numeric values red (negative) / green (positive)
+# ---------------------------------------------------------------------------
+def style_signed(df, cols):
+    def _color(val):
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return ""
+        if v > 0:
+            return "color: #2ecc71"
+        elif v < 0:
+            return "color: #e74c3c"
+        return ""
+    existing = [c for c in cols if c in df.columns]
+    return df.style.applymap(_color, subset=existing)
+
+
+# ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 st.title("📈 StopLoss")
@@ -443,7 +461,8 @@ st.divider()
 st.subheader("🏦 FII / DII Activity (₹ Cr, Provisional)")
 fii_dii_df = get_fii_dii()
 if fii_dii_df is not None and len(fii_dii_df) > 0:
-    st.dataframe(fii_dii_df, use_container_width=True, hide_index=True)
+    net_col = [c for c in fii_dii_df.columns if "net" in c.lower()]
+    st.dataframe(style_signed(fii_dii_df, net_col), use_container_width=True, hide_index=True)
 else:
     st.info("FII/DII data unavailable right now — NSE's public endpoint occasionally blocks "
             "automated requests. This usually resolves on refresh.")
@@ -455,7 +474,7 @@ all_indices = get_all_indices()
 st.subheader("🏭 Sector Performance")
 sector_df = get_sector_performance(all_indices)
 if sector_df is not None:
-    st.dataframe(sector_df, use_container_width=True, hide_index=True)
+    st.dataframe(style_signed(sector_df, ["Change %"]), use_container_width=True, hide_index=True)
 else:
     st.info("Sector data unavailable right now — try refreshing.")
 st.divider()
@@ -505,7 +524,7 @@ with st.expander("➕ Manage watchlist"):
 
 with st.spinner("Fetching watchlist data..."):
     watchlist_df = get_watchlist_data(st.session_state.watchlist)
-st.dataframe(watchlist_df, use_container_width=True, hide_index=True)
+st.dataframe(style_signed(watchlist_df, ["Change %", "MACD"]), use_container_width=True, hide_index=True)
 st.caption("ROCE, Delivery %, Promoter/FII/DII Holding: not available from free data "
            "sources — shown as N/A until a paid data vendor is added.")
 st.divider()
@@ -579,6 +598,23 @@ checklist_items = [
     ("Are valuations reasonable?", valuation is not None and valuation["status"] != "🔴 Expensive"),
     ("No major events today?", datetime.now().strftime("%Y-%m-%d") not in [e["date"] for e in EVENTS]),
 ]
+positives = sum(1 for _, ok in checklist_items if ok)
+total_checks = len(checklist_items)
+
+if health_score is not None:
+    if health_score >= 70:
+        verdict = f"🟢 **Conditions look supportive ({health_score}/100).** Most of what we can measure — breadth, FII flows, volatility, sector participation — is pointing the right way. Still your call, but this isn't a market fighting you right now."
+    elif health_score >= 40:
+        verdict = f"🟠 **Mixed picture ({health_score}/100).** Some signals are constructive, others aren't — {positives}/{total_checks} checklist items are green. Worth being selective rather than aggressive."
+    else:
+        verdict = f"🔴 **Caution warranted ({health_score}/100).** Most of what we can measure is leaning unfavorable right now — only {positives}/{total_checks} checklist items are green. Not a strong backdrop for fresh risk."
+else:
+    verdict = "⚪ Not enough data came through to form a verdict right now — try refreshing."
+st.markdown(verdict)
+st.caption("This is a mechanical read of a handful of free indicators — not investment advice. "
+           "Missing/unavailable data points are simply excluded from the score rather than counted against it.")
+
+st.markdown("**Checklist detail**")
 for label, ok in checklist_items:
     st.write(("✅ " if ok else "⚠️ ") + label)
 
